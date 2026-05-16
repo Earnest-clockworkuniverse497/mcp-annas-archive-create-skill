@@ -164,7 +164,27 @@ Just **two tools**, no decision fatigue:
 | `enrich` | Add a book's methodology to an EXISTING SKILL.md | Surgical inserts into named sections; backup saved; auto-rollback if audit worsens |
 | `preview` | Discover what Gemini would produce, decide interactively | **No writes.** Returns full SKILL.md preview (no `skill_path`) or proposed additions + patched preview (with `skill_path`) |
 
-### Example: create
+### What you can pass as `book`
+
+The same `book` parameter accepts three forms — `book_skill` picks automatically:
+
+| Form | Example | Behaviour |
+|---|---|---|
+| **Local file path** | `/home/user/Downloads/mom-test.pdf` (also `~/`, `./`) | Anna's Archive is NOT called. File is read directly. Supported: `.epub`, `.fb2`, `.pdf`, `.txt`. |
+| **MD5 (32 hex)** | `ad8211428498baf5e6197a2579e4acf2` | Looks for `$DATA_DIR/books/<md5>.*` first; downloads from Anna's only if missing. |
+| **Search query** | `Designing Data-Intensive Applications Kleppmann` | Searches Anna's, picks best hit (prefers epub→fb2→pdf→txt), downloads. |
+
+### Example: create from a local file
+
+```json
+{
+  "mode": "create",
+  "book": "/home/user/books/the-mom-test.pdf",
+  "promote_to": "/home/user/.claude/skills/book-mom-test/SKILL.md"
+}
+```
+
+### Example: create via Anna's search
 
 ```json
 {

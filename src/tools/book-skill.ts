@@ -9,11 +9,12 @@
  * Internally orchestrates search → download → text-extract → Gemini → render/patch → audit.
  */
 import { z } from "zod";
-import { readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile, writeFile, mkdir, copyFile, readdir, stat } from "node:fs/promises";
+import { dirname, join, resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   loadConfigFromEnv as loadAnnas,
   searchBooks,
@@ -48,7 +49,12 @@ export const BookSkillInputSchema = z.object({
     .describe(
       "create = book → new SKILL.md (audit-gated promote); enrich = book → surgical additions into existing SKILL.md (auto-rollback if audit worsens); preview = book → analysis + proposed additions, no writes",
     ),
-  book: z.string().min(2).describe("Book MD5 (32 hex) OR a search query (title, author, keywords)"),
+  book: z
+    .string()
+    .min(2)
+    .describe(
+      "One of: (1) absolute path to a local file (.epub/.fb2/.pdf/.txt) — Anna's Archive is NOT called; (2) Book MD5 (32 hex chars) — looks for $DATA_DIR/books/<md5>.* first, downloads from Anna's if missing; (3) search query (title, author, keywords) — finds best hit on Anna's.",
+    ),
   skill_path: z
     .string()
     .optional()
@@ -90,9 +96,43 @@ async function findCachedByMd5(md5: string, booksDir: string): Promise<BookFile 
   }
 }
 
+async function asLocalFile(input: string): Promise<BookFile | null> {
+  const isPathLike =
+    input.startsWith("/") ||
+    input.startsWith("./") ||
+    input.startsWith("../") ||
+    input.startsWith("~/") ||
+    /^[A-Za-z]:\\/.test(input);
+  if (!isPathLike) return null;
+  const absPath = input.startsWith("~/")
+    ? join(homedir(), input.slice(2))
+    : resolve(input);
+  try {
+    const s = await stat(absPath);
+    if (!s.isFile() || s.size === 0) return null;
+  } catch {
+    return null;
+  }
+  const ext = extname(absPath).slice(1).toLowerCase() || "bin";
+  const SUPPORTED = ["epub", "fb2", "pdf", "txt"];
+  if (!SUPPORTED.includes(ext)) {
+    throw new Error(
+      `local file ${absPath} has unsupported extension .${ext}. Supported: ${SUPPORTED.join(", ")}`,
+    );
+  }
+  // Compute md5 of file contents so subsequent runs with the same file hit cache.
+  const buf = readFileSync(absPath);
+  const md5 = createHash("md5").update(buf).digest("hex");
+  return { md5, path: absPath, format: ext, size_bytes: buf.length };
+}
+
 async function resolveAndDownload(book: string): Promise<BookFile> {
   const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
   const booksDir = join(dataDir, "books");
+
+  // Highest priority: user-supplied local file path
+  const local = await asLocalFile(book);
+  if (local) return local;
 
   let md5 = book;
   const isMd5 = /^[a-f0-9]{32}$/i.test(book);

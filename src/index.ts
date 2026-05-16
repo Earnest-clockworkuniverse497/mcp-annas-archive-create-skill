@@ -50,7 +50,9 @@ server.registerTool(
       book: z
         .string()
         .min(2)
-        .describe("Book MD5 (32 hex) OR a search query (title, author, keywords)"),
+        .describe(
+          "One of: (1) absolute path to a local file (.epub/.fb2/.pdf/.txt) — Anna's Archive is NOT called; (2) Book MD5 (32 hex chars); (3) search query (title, author, keywords).",
+        ),
       skill_path: z
         .string()
         .optional()

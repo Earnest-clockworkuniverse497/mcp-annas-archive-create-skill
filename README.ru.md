@@ -165,6 +165,26 @@ DATA_DIR=./data
 | `enrich` | Дополнить ОДНОЙ книгой существующий SKILL.md | Surgical вставки; backup сохраняется; auto-rollback если audit стал хуже |
 | `preview` | Посмотреть что Gemini выдаст, решить интерактивно | **Ничего не пишет.** Возвращает SKILL.md preview (без `skill_path`) или предложенные additions + patched preview (с `skill_path`) |
 
+### Что можно передать в `book`
+
+Параметр `book` принимает 3 формы — `book_skill` определяет автоматически:
+
+| Форма | Пример | Поведение |
+|---|---|---|
+| **Локальный путь** | `/home/user/Downloads/mom-test.pdf` (тоже `~/`, `./`) | Anna's Archive **не вызывается**. Файл читается напрямую. Поддерживается: `.epub`, `.fb2`, `.pdf`, `.txt`. |
+| **MD5 (32 hex)** | `ad8211428498baf5e6197a2579e4acf2` | Ищет в `$DATA_DIR/books/<md5>.*` сначала; качает с Anna's только если нет в кеше. |
+| **Поисковый запрос** | `Designing Data-Intensive Applications Kleppmann` | Ищет на Anna's, берёт лучший хит (приоритет epub→fb2→pdf→txt), скачивает. |
+
+### Пример: create из локального файла
+
+```json
+{
+  "mode": "create",
+  "book": "/home/user/books/the-mom-test.pdf",
+  "promote_to": "/home/user/.claude/skills/book-mom-test/SKILL.md"
+}
+```
+
 ### Пример: `book_to_skill`
 
 ```json
