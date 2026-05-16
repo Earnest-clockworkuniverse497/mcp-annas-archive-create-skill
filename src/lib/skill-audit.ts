@@ -121,11 +121,19 @@ export function auditSkillMd(content: string): AuditResult {
     passes.push(`size ${lines.length} lines (cap 500)`);
   }
 
-  for (const pat of PLACEHOLDER_PATTERNS) {
-    const m = content.match(pat);
-    if (m) {
-      issues.push({ level: "error", rule: "placeholder-prose", message: `placeholder content found: "${m[0]}" — replace with real content` });
-      break;
+  {
+    // Scan only non-citation, non-frontmatter lines for placeholder tokens. guardian: allow
+    // Quoted lines (starting with '>') may legitimately contain such tokens. guardian: allow
+    const scanLines = content
+      .split(/\r?\n/)
+      .filter((l) => !l.startsWith(">") && !l.startsWith("source:"))
+      .join("\n");
+    for (const pat of PLACEHOLDER_PATTERNS) {
+      const m = scanLines.match(pat);
+      if (m) {
+        issues.push({ level: "error", rule: "placeholder-prose", message: `placeholder content found: "${m[0]}" — replace with real content` });
+        break;
+      }
     }
   }
 

@@ -13,6 +13,7 @@ import { readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { readdir, stat } from "node:fs/promises";
 import {
   loadConfigFromEnv as loadAnnas,
   searchBooks,
@@ -24,6 +25,8 @@ import { generateText, loadGeminiConfigFromEnv } from "../lib/gemini-client.js";
 import {
   isExtractionError,
   renderSkillMd,
+  renderPattern2,
+  shouldUsePattern2,
   validateExtraction,
   type SkillExtraction,
 } from "../lib/skill-renderer.js";
@@ -33,6 +36,7 @@ import {
   type EnrichmentPayload,
 } from "../lib/skill-patcher.js";
 import { auditSkillMd, type AuditResult } from "../lib/skill-audit.js";
+import { loadSkill, formatSkillForPrompt } from "../lib/skill-loader.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXTRACT_PROMPT = resolve(HERE, "..", "prompts", "extract-skill.md");
@@ -71,21 +75,48 @@ interface BookFile {
   size_bytes: number;
 }
 
+async function findCachedByMd5(md5: string, booksDir: string): Promise<BookFile | null> {
+  try {
+    const entries = await readdir(booksDir);
+    const match = entries.find((e) => e.startsWith(`${md5}.`));
+    if (!match) return null;
+    const path = join(booksDir, match);
+    const s = await stat(path);
+    if (s.size === 0) return null;
+    const ext = match.split(".").pop()?.toLowerCase() ?? "bin";
+    return { md5, path, format: ext, size_bytes: s.size };
+  } catch {
+    return null;
+  }
+}
+
 async function resolveAndDownload(book: string): Promise<BookFile> {
-  const cfg = loadAnnas();
+  const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
+  const booksDir = join(dataDir, "books");
+
   let md5 = book;
-  if (!/^[a-f0-9]{32}$/i.test(book)) {
+  const isMd5 = /^[a-f0-9]{32}$/i.test(book);
+
+  // Fast path: cached file by md5 — skip Anna's API entirely
+  if (isMd5) {
+    const cached = await findCachedByMd5(md5, booksDir);
+    if (cached) return cached;
+  }
+
+  const cfg = loadAnnas();
+  if (!isMd5) {
     const hits = await searchBooks(cfg, book, 10);
     if (hits.length === 0) throw new Error(`no Anna's Archive results for: ${book}`);
     const priority: Record<string, number> = { epub: 1, fb2: 2, pdf: 3, txt: 4 };
     hits.sort((a, b) => (priority[a.format] ?? 9) - (priority[b.format] ?? 9));
     md5 = hits[0].md5;
+    // Recheck cache after resolving md5
+    const cached = await findCachedByMd5(md5, booksDir);
+    if (cached) return cached;
   }
 
   const indices = [0, 1, 2, 3];
   let lastErr: unknown;
-  const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
-  const booksDir = join(dataDir, "books");
 
   for (const idx of indices) {
     try {
@@ -119,7 +150,19 @@ async function runCreate(input: BookSkillInput, common: CommonFields, parsedJson
     };
   }
   const skill: SkillExtraction = validateExtraction(parsedJson);
-  const skillMd = renderSkillMd(skill);
+  const singleFileMd = renderSkillMd(skill);
+  const singleLines = singleFileMd.split(/\r?\n/).length;
+  const usePattern2 = shouldUsePattern2(skill, singleLines);
+
+  let skillMd: string;
+  let pattern2Files: Array<{ filename: string; content: string }> = [];
+  if (usePattern2) {
+    const p2 = renderPattern2(skill);
+    skillMd = p2.skill_md;
+    pattern2Files = p2.references;
+  } else {
+    skillMd = singleFileMd;
+  }
   const audit = auditSkillMd(skillMd);
 
   const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
@@ -127,6 +170,7 @@ async function runCreate(input: BookSkillInput, common: CommonFields, parsedJson
   let draftSkillPath = "";
   let draftJsonPath = "";
   let promotedPath: string | null = null;
+  const writtenReferences: string[] = [];
 
   if (!input.dry_run) {
     await mkdir(draftDir, { recursive: true });
@@ -134,31 +178,62 @@ async function runCreate(input: BookSkillInput, common: CommonFields, parsedJson
     draftJsonPath = join(draftDir, "extraction.json");
     await writeFile(draftJsonPath, JSON.stringify(skill, null, 2), "utf-8");
     await writeFile(draftSkillPath, skillMd, "utf-8");
+    if (usePattern2) {
+      const refsDir = join(draftDir, "references");
+      await mkdir(refsDir, { recursive: true });
+      for (const ref of pattern2Files) {
+        const refPath = join(refsDir, ref.filename);
+        await writeFile(refPath, ref.content, "utf-8");
+        writtenReferences.push(refPath);
+      }
+    }
 
     if (input.promote_to) {
       if (!audit.passed) {
         return {
           ok: false,
           ...common,
+          pattern_2: usePattern2,
           skill: { name: skill.name, description_length: skill.description.length, capability_count: skill.capabilities.length, citation_count: skill.citations.length },
           audit,
-          paths: { ...common.paths, draft_skill_md: draftSkillPath, draft_extraction_json: draftJsonPath, promoted_skill_md: null },
+          paths: { ...common.paths, draft_skill_md: draftSkillPath, draft_extraction_json: draftJsonPath, draft_references: writtenReferences, promoted_skill_md: null, promoted_references: [] },
           error: `cannot promote: audit has ${audit.error_count} errors`,
         };
       }
+      const promotedRefs: string[] = [];
       await mkdir(dirname(input.promote_to), { recursive: true });
       await copyFile(draftSkillPath, input.promote_to);
       promotedPath = input.promote_to;
+      if (usePattern2) {
+        const targetRefsDir = join(dirname(input.promote_to), "references");
+        await mkdir(targetRefsDir, { recursive: true });
+        for (const ref of pattern2Files) {
+          const targetRefPath = join(targetRefsDir, ref.filename);
+          await writeFile(targetRefPath, ref.content, "utf-8");
+          promotedRefs.push(targetRefPath);
+        }
+      }
+      return {
+        ok: audit.passed,
+        ...common,
+        pattern_2: usePattern2,
+        skill: { name: skill.name, description_length: skill.description.length, capability_count: skill.capabilities.length, citation_count: skill.citations.length },
+        audit,
+        paths: { ...common.paths, draft_skill_md: draftSkillPath, draft_extraction_json: draftJsonPath, draft_references: writtenReferences, promoted_skill_md: promotedPath, promoted_references: promotedRefs },
+      };
     }
   }
 
   return {
     ok: audit.passed,
     ...common,
+    pattern_2: usePattern2,
     skill: { name: skill.name, description_length: skill.description.length, capability_count: skill.capabilities.length, citation_count: skill.citations.length },
     audit,
-    paths: { ...common.paths, draft_skill_md: draftSkillPath, draft_extraction_json: draftJsonPath, promoted_skill_md: promotedPath },
-    ...(input.dry_run ? { preview_skill_md: skillMd } : {}),
+    paths: { ...common.paths, draft_skill_md: draftSkillPath, draft_extraction_json: draftJsonPath, draft_references: writtenReferences, promoted_skill_md: promotedPath, promoted_references: [] },
+    ...(input.dry_run
+      ? { preview_skill_md: skillMd, preview_references: pattern2Files }
+      : {}),
   };
 }
 
@@ -270,15 +345,27 @@ export async function bookSkill(input: BookSkillInput) {
   let promptTemplate: string;
   let currentSkillContent: string | null = null;
   let auditBefore: AuditResult | null = null;
+  let skillContextSummary: { is_pattern_2: boolean; references_count: number; total_chars: number } | null = null;
 
   const useEnrichPrompt = input.mode === "enrich" || (input.mode === "preview" && input.skill_path);
 
   if (useEnrichPrompt && input.skill_path) {
-    currentSkillContent = await readFile(input.skill_path, "utf-8");
-    auditBefore = auditSkillMd(currentSkillContent);
+    const loaded = await loadSkill(input.skill_path);
+    currentSkillContent = loaded.skill_md;
+    auditBefore = auditSkillMd(loaded.skill_md);
+    skillContextSummary = {
+      is_pattern_2: loaded.is_pattern_2,
+      references_count: loaded.references.length,
+      total_chars: loaded.total_chars,
+    };
+
     const tmpl = await readFile(ENRICH_PROMPT, "utf-8");
     const focusLine = input.focus ? `FOCUS: ${input.focus}\n\n` : "";
-    promptTemplate = `${tmpl}\n\n---\nCURRENT SKILL.md:\n---\n${currentSkillContent}\n\n---\n${focusLine}BOOK TEXT:\n---\n${text}`;
+    const skillBlob = formatSkillForPrompt(loaded);
+    const p2Note = loaded.is_pattern_2
+      ? `\n\nNOTE: This is a Pattern 2 skill — the navigator SKILL.md plus ${loaded.references.length} references file(s) are ALL provided below. Treat them as a single skill when deciding what's already covered vs new.\n`
+      : "";
+    promptTemplate = `${tmpl}${p2Note}\n\n---\nCURRENT SKILL (full content${loaded.is_pattern_2 ? ", including references/" : ""}):\n---\n${skillBlob}\n\n---\n${focusLine}BOOK TEXT:\n---\n${text}`;
   } else {
     const tmpl = await readFile(EXTRACT_PROMPT, "utf-8");
     promptTemplate = `${tmpl}\n\n---\nBOOK TEXT:\n---\n${text}`;
@@ -321,6 +408,10 @@ export async function bookSkill(input: BookSkillInput) {
   };
 
   if (input.mode === "create") return runCreate(input, common, parsedJson);
-  if (input.mode === "enrich") return runEnrich(input, common, parsedJson, currentSkillContent ?? "", auditBefore ?? auditSkillMd(""));
-  return runPreview(input, common, parsedJson, currentSkillContent, auditBefore);
+  if (input.mode === "enrich") {
+    const r = await runEnrich(input, common, parsedJson, currentSkillContent ?? "", auditBefore ?? auditSkillMd(""));
+    return { ...r, skill_context: skillContextSummary };
+  }
+  const r = await runPreview(input, common, parsedJson, currentSkillContent, auditBefore);
+  return { ...r, skill_context: skillContextSummary };
 }

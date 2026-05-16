@@ -335,7 +335,7 @@ The Gemini prompt requires citations with chapter/page for every capability. Gen
 - [x] `book_enrich_skill(skill_path, book)` — augment an existing SKILL.md with a new book — shipped in v0.2.0
 - [x] Unified `book_skill` modal tool (`create | enrich | preview`) — shipped in v0.3.0
 - [x] WireGuard / SOCKS5 proxy opt-in via `ANNAS_HTTPS_PROXY` env (annas-only; Gemini direct) — shipped in v0.1.1
-- [ ] **Pattern 2 awareness** — for enrich, read entire skill folder (SKILL.md + `references/*.md`) for context; for create, auto-split into Pattern 2 when content >500 lines
+- [x] **Pattern 2 awareness** — enrich/preview now read the entire skill folder (SKILL.md + `references/*.md`); create auto-splits into Pattern 2 when content would exceed ~500 lines — shipped in v0.4.0
 - [ ] Retry-with-feedback — on audit failure, re-prompt Gemini with the specific audit issues
 - [ ] `book_synthesize_skill(books[], target_name)` — merge N books into one synthesized skill
 - [ ] Published to npm as `mcp-annas-archive-create-skill`

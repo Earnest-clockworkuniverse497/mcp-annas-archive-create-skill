@@ -318,7 +318,7 @@ Gemini промпт требует цитаты с указанием главы
 
 - [x] `book_enrich_skill(skill_path, book)` — обогащение существующего SKILL.md новой книгой — выпущено в v0.2.0
 - [x] Унифицированный `book_skill` модальный (`create | enrich | preview`) — выпущено в v0.3.0
-- [ ] **Pattern 2 awareness** — для enrich читать всю папку скилла (SKILL.md + `references/*.md`); для create авто-сплит в Pattern 2 если контент >500 строк
+- [x] **Pattern 2 awareness** — enrich/preview читают всю папку скилла (SKILL.md + `references/*.md`); create авто-сплит в Pattern 2 если рендер превысит ~500 строк — выпущено в v0.4.0
 - [ ] Retry с feedback — при провале аудита, перепрашиваем Gemini с конкретными issues
 - [ ] `book_synthesize_skill(books[], target_name)` — синтез N книг в один сводный скилл
 - [x] WireGuard / SOCKS5 proxy opt-in через `ANNAS_HTTPS_PROXY` (только трафик anna's; Gemini напрямую) — выпущено в v0.1.1
