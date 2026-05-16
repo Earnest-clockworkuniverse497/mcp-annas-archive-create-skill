@@ -1,0 +1,68 @@
+{
+  "name": "mcp-annas-archive-create-skill",
+  "version": "0.1.0",
+  "description": "MCP server for Claude Code: search & download books from Anna's Archive, extract methodology with Gemini, audit and generate a production-ready SKILL.md (Anthropic Agent Skills standard).",
+  "type": "module",
+  "main": "dist/index.js",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "claude-skill",
+    "anna-archive",
+    "annas-archive",
+    "anthropic",
+    "ai-agent",
+    "agent-skills",
+    "book-extraction",
+    "methodology",
+    "gemini",
+    "google-ai-studio",
+    "rag",
+    "knowledge-extraction",
+    "epub",
+    "pdf",
+    "fb2",
+    "skill-evaluation",
+    "stdio-server"
+  ],
+  "homepage": "https://github.com/VKirill/mcp-annas-archive-create-skill",
+  "bugs": {
+    "url": "https://github.com/VKirill/mcp-annas-archive-create-skill/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VKirill/mcp-annas-archive-create-skill.git"
+  },
+  "author": {
+    "name": "Kirill Vechkasov",
+    "url": "https://t.me/pomogay_marketing"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "smoke": "tsx src/smoke.ts",
+    "smoke:analyze": "tsx src/smoke-analyze.ts",
+    "smoke:skill": "tsx src/smoke-skill.ts",
+    "smoke:batch": "tsx src/smoke-batch.ts",
+    "enrich:architect": "tsx src/enrich-architect-skill.ts",
+    "smoke:e2e": "tsx src/smoke-e2e.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "undici": "^6.21.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

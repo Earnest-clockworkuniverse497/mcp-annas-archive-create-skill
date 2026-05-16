@@ -1,0 +1,35 @@
+# Dependencies & build
+node_modules/
+dist/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+secrets/
+
+# Local data — downloaded books and skill drafts contain copyrighted material
+data/
+*.epub
+*.pdf
+*.fb2
+*.mobi
+*.djvu
+
+# Backup files
+*.bak
+*.bak-*
+
+# Logs
+*.log
+.npm
+
+# OS / IDE noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code session artifacts that may auto-spawn
+.claude/
