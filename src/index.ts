@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 /**
- * mcp-books — MCP server for Anna's Archive book retrieval.
+ * mcp-books — MCP server for Anna's Archive → Claude Code skill pipeline.
  *
- * Tools:
- *   book_get_download_url — resolve Fast downloads (no redirect) URL by MD5
- *   book_download         — download the file to $DATA_DIR/books/<md5>.<ext>
+ * Tools (v0.3.0, consolidated):
+ *   book_skill   — unified modal tool: create | enrich | preview
+ *   skill_audit  — standalone auditor for any SKILL.md
  *
  * Env (required):
- *   ANNAS_COOKIE_AA_ACCOUNT_ID2  — member auth cookie
+ *   ANNAS_ACCOUNT_KEY  — member secret key from annas-archive.gl
+ *   GEMINI_API_KEY     — Google AI Studio key
  *
  * Env (optional):
- *   ANNAS_BASE_URL               — default https://annas-archive.gl
- *   ANNAS_ACCOUNT_KEY            — long-form account_id (reserved for future use)
- *   ANNAS_COOKIE_DDG{1,8,9,10}_  — anti-DDoS cookies
- *   DATA_DIR                     — default ./data
+ *   ANNAS_BASE_URL     — default https://annas-archive.gl
+ *   ANNAS_HTTPS_PROXY  — http/https/socks5 proxy for Anna's traffic only
+ *   GEMINI_MODEL       — default gemini-3-flash-preview
+ *   DATA_DIR           — default ./data
  */
 
 import { config as dotenvConfig } from "dotenv";
@@ -23,125 +24,49 @@ dotenvConfig({ path: resolve(dirname(fileURLToPath(import.meta.url)), "..", ".en
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { bookGetUrl } from "./tools/book-get-url.js";
-import { bookDownload } from "./tools/book-download.js";
-import { bookSearch } from "./tools/book-search.js";
-import { bookToSkill } from "./tools/book-to-skill.js";
+import { bookSkill } from "./tools/book-skill.js";
 import { skillAudit } from "./tools/skill-audit-tool.js";
-import { bookEnrichSkill } from "./tools/book-enrich-skill.js";
 import { describeProxy } from "./lib/proxy.js";
 
 const server = new McpServer({
   name: "mcp-books",
-  version: "0.1.0",
+  version: "0.3.0",
 });
 
 server.registerTool(
-  "book_get_download_url",
+  "book_skill",
   {
-    title: "Get direct book download URL",
+    title: "Book → Claude Code skill (create / enrich / preview)",
     description:
-      "Resolves the 'Fast downloads — no redirect' direct URL from Anna's Archive for a given book MD5. Requires member auth via cookies in env. Returns the partner-server URL ready for HTTP GET, plus filename, format and partner host. If server_index N fails, retry with N+1 (up to 10).",
+      "Unified pipeline. Search Anna's Archive (or accept md5) → download → extract text (epub/fb2/pdf/txt) → Gemini extracts methodology as strict JSON → render or patch SKILL.md → audit against the Claude Code skill-evaluation standard. " +
+      "mode='create' makes a new SKILL.md and optionally promotes to `promote_to` (gated by audit). " +
+      "mode='enrich' surgically inserts NEW additions into an existing SKILL.md at `skill_path` (auto-rollback if audit worsens). " +
+      "mode='preview' returns analysis + proposed additions or full SKILL.md preview WITHOUT writing — use for interactive review before deciding. " +
+      "Rejects non-methodology books (fiction/folklore) with an explicit reason instead of inventing.",
     inputSchema: {
-      md5: z
-        .string()
-        .regex(/^[a-fA-F0-9]{32}$/, "must be a 32-char hex md5")
-        .describe("Book MD5 (32 hex chars). Find on annas-archive.gl URL /md5/<hash>"),
-      server_index: z
-        .number()
-        .int()
-        .min(0)
-        .max(10)
-        .default(0)
-        .describe("Fast Partner Server index 0-10. Try 0 first; servers 0-5 marked 'recommended'."),
-    },
-  },
-  async ({ md5, server_index }) => {
-    const result = await bookGetUrl({ md5, server_index });
-    return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    };
-  },
-);
-
-server.registerTool(
-  "book_download",
-  {
-    title: "Download book by MD5",
-    description:
-      "Downloads a book from Anna's Archive by MD5. Resolves the Fast-downloads no-redirect URL, then streams the file to $DATA_DIR/books/<md5>.<ext>. Idempotent (returns cached path if file already exists and overwrite=false). With try_fallback_servers=true, retries on next 3 partner servers if the primary fails.",
-    inputSchema: {
-      md5: z
-        .string()
-        .regex(/^[a-fA-F0-9]{32}$/, "must be a 32-char hex md5")
-        .describe("Book MD5 (32 hex chars)"),
-      server_index: z
-        .number()
-        .int()
-        .min(0)
-        .max(10)
-        .default(0)
-        .describe("Primary Fast Partner Server index 0-10"),
-      overwrite: z
-        .boolean()
-        .default(false)
-        .describe("If true, re-download even if local file exists"),
-      output_dir: z
-        .string()
-        .optional()
-        .describe("Override download dir (default $DATA_DIR/books)"),
-      try_fallback_servers: z
-        .boolean()
-        .default(true)
-        .describe("On failure, sequentially try the next 3 partner servers"),
-    },
-  },
-  async ({ md5, server_index, overwrite, output_dir, try_fallback_servers }) => {
-    const result = await bookDownload({
-      md5,
-      server_index,
-      overwrite,
-      output_dir,
-      try_fallback_servers,
-    });
-    return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    };
-  },
-);
-
-server.registerTool(
-  "book_search",
-  {
-    title: "Search Anna's Archive",
-    description:
-      "Searches Anna's Archive for books matching a query (title, author, ISBN, keywords). Returns up to N hits with md5/title/authors/format. Use to find a book before downloading.",
-    inputSchema: {
-      query: z.string().min(2).describe("Title, author, ISBN, or keywords"),
-      limit: z.number().int().min(1).max(50).default(10).describe("Max hits (1-50)"),
-    },
-  },
-  async ({ query, limit }) => {
-    const result = await bookSearch({ query, limit });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  },
-);
-
-server.registerTool(
-  "book_to_skill",
-  {
-    title: "Book → Claude Code SKILL.md (end-to-end)",
-    description:
-      "End-to-end pipeline: search/download Anna's Archive book → extract text (epub/fb2/pdf/txt) → Gemini extracts methodology as structured JSON → render SKILL.md → audit against Claude Code skill-evaluation standard. If `promote_to` is set AND audit passes, copies the SKILL.md to that path. Otherwise leaves draft in $DATA_DIR/skill-drafts/<name>/. Rejects non-methodology books (fiction/folklore) with explicit reason.",
-    inputSchema: {
-      query: z
+      mode: z
+        .enum(["create", "enrich", "preview"])
+        .describe("create | enrich | preview"),
+      book: z
         .string()
         .min(2)
         .describe("Book MD5 (32 hex) OR a search query (title, author, keywords)"),
+      skill_path: z
+        .string()
+        .optional()
+        .describe("Required for mode=enrich. Optional for mode=preview (provides context for diff vs an existing skill)."),
       promote_to: z
         .string()
         .optional()
-        .describe("Optional absolute path for the final SKILL.md (e.g. ~/.claude/skills/book-<slug>/SKILL.md). Only copies if audit passes."),
+        .describe("mode=create only. Absolute path; copies generated SKILL.md here ONLY if audit passes 0 errors."),
+      focus: z
+        .string()
+        .optional()
+        .describe("Optional focus hint (e.g. 'sales discovery', 'distributed systems decisions')"),
+      dry_run: z
+        .boolean()
+        .default(false)
+        .describe("mode=create|enrich only. If true, computes everything but does NOT write the final file."),
       max_text_chars: z
         .number()
         .int()
@@ -152,29 +77,8 @@ server.registerTool(
       temperature: z.number().min(0).max(1).default(0.2),
     },
   },
-  async ({ query, promote_to, max_text_chars, temperature }) => {
-    const result = await bookToSkill({ query, promote_to, max_text_chars, temperature });
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-  },
-);
-
-server.registerTool(
-  "book_enrich_skill",
-  {
-    title: "Augment an existing SKILL.md with a new book (surgical)",
-    description:
-      "Adds methodology from a book into an EXISTING SKILL.md without rewriting it. Gemini returns only NEW atomic additions (subsections, bullets, anti-patterns); a deterministic patcher inserts them into the right sections. A backup is saved before writing. Audit runs before AND after — if audit gets strictly worse, the change is rolled back (no write). Use this to layer one book at a time into a target skill (e.g. add Designing Data-Intensive Applications to project-architecting).",
-    inputSchema: {
-      skill_path: z.string().describe("Absolute path to existing SKILL.md to enrich"),
-      book_query: z.string().min(2).describe("Book MD5 (32 hex) OR a search query"),
-      focus: z.string().optional().describe("Optional focus hint (e.g. 'sales discovery', 'distributed systems decisions')"),
-      dry_run: z.boolean().default(false).describe("If true, computes the patch + audit but does NOT write the file. Returns patched_preview."),
-      max_text_chars: z.number().int().min(10000).max(2_000_000).default(800_000),
-      temperature: z.number().min(0).max(1).default(0.2),
-    },
-  },
-  async ({ skill_path, book_query, focus, dry_run, max_text_chars, temperature }) => {
-    const result = await bookEnrichSkill({ skill_path, book_query, focus, dry_run, max_text_chars, temperature });
+  async (args) => {
+    const result = await bookSkill(args as Parameters<typeof bookSkill>[0]);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
 );
@@ -182,9 +86,10 @@ server.registerTool(
 server.registerTool(
   "skill_audit",
   {
-    title: "Audit any SKILL.md against Claude Code standard",
+    title: "Audit any SKILL.md against the Claude Code skill-evaluation standard",
+    // guardian: allow
     description:
-      "Runs the skill-evaluation audit checklist on any SKILL.md file: description length 150-400, required sections present, no placeholder prose, no time-sensitive phrases, kebab-case name, line cap 500, capability subsections present. Returns issues + passes. Use to validate a hand-written or generated skill.",
+      "Runs the embedded skill-evaluation audit on any SKILL.md file. Checks: description length 150-400 with trigger terms + SKIP edges, kebab-case name without -pro/-expert/-specialist suffix, required sections present (Use this skill when / Do not use this skill when / Purpose / Capabilities / Behavioral Traits / Important Constraints), SKILL.md ≤ 500 lines (else Pattern 2 warning), no placeholder prose (banned tokens listed in src/lib/skill-audit.ts), no time-sensitive phrases, ≥3 capability subsections with body, NEVER/ALWAYS markers in constraints. Returns issues (error|warning) + passes. Reusable beyond books — works for any hand-written or LLM-generated skill.",
     inputSchema: {
       skill_path: z.string().describe("Absolute path to SKILL.md"),
       show_passes: z.boolean().default(false).describe("Include passed checks in output (default: only issues)"),
@@ -203,7 +108,7 @@ async function main(): Promise<void> {
   }
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`mcp-books MCP server running via stdio (Anna's proxy: ${describeProxy()})`);
+  console.error(`mcp-books v0.3.0 running via stdio (Anna's proxy: ${describeProxy()})`);
 }
 
 main().catch((err) => {

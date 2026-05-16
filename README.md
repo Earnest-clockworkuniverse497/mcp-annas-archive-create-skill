@@ -50,7 +50,7 @@ The output is **not** a human-readable summary. It is a **structured AI agent sk
 
 ## Key features
 
-- 🎯 **One tool call → full pipeline.** `book_to_skill("Title or md5")` returns a finished `SKILL.md` (or an honest rejection for fiction).
+- 🎯 **Two tools, three modes.** `book_skill({mode: "create"|"enrich"|"preview", book, ...})` covers the whole pipeline. `skill_audit` validates any SKILL.md.
 - 🚫 **Genre detection.** Refuses to invent skills from novels, folklore, or memoirs — returns `{error: "not_methodology", detected_genre: "..."}`.
 - 📚 **Citation-backed.** Every capability and constraint cites a verbatim quote with chapter + page reference.
 - ✅ **Audit gate.** Generated skills are validated against Anthropic Agent Skills best practices. Promotion to `~/.claude/skills/` happens **only if audit passes zero errors**.
@@ -82,7 +82,7 @@ The output is **not** a human-readable summary. It is a **structured AI agent sk
                                             └──────────────────┘
 ```
 
-Five MCP tools. One (`book_to_skill`) composes the others end-to-end.
+Two MCP tools. The unified `book_skill` runs the whole pipeline; `skill_audit` is standalone.
 
 ## Use cases
 
@@ -147,54 +147,79 @@ Free members get ~25 fast downloads/day. The `book_get_download_url` response in
 
 Default model `gemini-3-flash-preview` — approximately $0.50 / $3.00 per 1M input/output tokens at time of writing. A typical 300-page book extraction costs **$0.05–$0.20**.
 
-## MCP tools reference
+## MCP tools reference (v0.3.0 — consolidated)
 
-| Tool | What it does |
+Just **two tools**, no decision fatigue:
+
+| Tool | Purpose |
 |---|---|
-| `book_search` | Search Anna's Archive by title / author / ISBN / keywords. Returns md5 + metadata for up to 50 hits. |
-| `book_get_download_url` | Resolve direct partner-server URL for a known md5 (via JSON API). Returns quota info. |
-| `book_download` | Download by md5 to `$DATA_DIR/books/<md5>.<ext>`. Idempotent. Auto-fallback across 4 partner servers. |
-| **`book_to_skill`** | **Create.** End-to-end: query/md5 → download → extract → Gemini → render → audit → optional promote to `~/.claude/skills/<name>/SKILL.md`. |
-| **`book_enrich_skill`** | **Augment.** Surgical additions from a new book into an EXISTING SKILL.md. Gemini returns only NEW atomic items; a deterministic patcher inserts them into the right sections. Backup saved. If audit gets strictly worse → automatic rollback. Supports `dry_run`. |
-| `skill_audit` | Run the embedded skill-evaluation audit on any SKILL.md file. Reusable beyond books. |
+| **`book_skill`** | Modal pipeline. `mode=create` → new SKILL.md. `mode=enrich` → additions into existing SKILL.md. `mode=preview` → analysis + proposed additions, NO writes (for interactive review by the agent). |
+| `skill_audit` | Audit any SKILL.md against the Claude Code skill-evaluation standard. Reusable beyond books. |
 
-### Example: `book_to_skill`
+### `book_skill` modes at a glance
+
+| mode | When to use | Side effect |
+|---|---|---|
+| `create` | New skill from a book | Writes `$DATA_DIR/skill-drafts/<name>/SKILL.md`; optionally copies to `promote_to` IF audit passes 0 errors |
+| `enrich` | Add a book's methodology to an EXISTING SKILL.md | Surgical inserts into named sections; backup saved; auto-rollback if audit worsens |
+| `preview` | Discover what Gemini would produce, decide interactively | **No writes.** Returns full SKILL.md preview (no `skill_path`) or proposed additions + patched preview (with `skill_path`) |
+
+### Example: create
 
 ```json
 {
-  "query": "Designing Data-Intensive Applications Kleppmann",
-  "promote_to": "/home/user/.claude/skills/book-ddia/SKILL.md",
-  "max_text_chars": 800000,
-  "temperature": 0.2
+  "mode": "create",
+  "book": "Designing Data-Intensive Applications Kleppmann",
+  "promote_to": "/home/user/.claude/skills/book-ddia/SKILL.md"
 }
 ```
 
-Response on success:
+### Example: enrich an existing skill
+
+```json
+{
+  "mode": "enrich",
+  "book": "User Story Mapping Jeff Patton",
+  "skill_path": "/home/user/.claude/skills/project-architecting/SKILL.md",
+  "focus": "MVP slicing, walking skeleton"
+}
+```
+
+Response (success):
 
 ```json
 {
   "ok": true,
-  "md5": "...",
-  "gemini": { "prompt_tokens": 150000, "output_tokens": 2500, "total_tokens": 152500 },
-  "skill": { "name": "book-ddia", "description_length": 350, "capability_count": 6, "citation_count": 9 },
-  "audit": { "passed": true, "error_count": 0, "warning_count": 1, "pass_count": 12 },
-  "paths": {
-    "draft_skill_md": "...skill-drafts/book-ddia/SKILL.md",
-    "draft_extraction_json": "...skill-drafts/book-ddia/extraction.json",
-    "promoted_skill_md": "/home/user/.claude/skills/book-ddia/SKILL.md"
-  }
+  "mode": "enrich",
+  "additions_count": 7,
+  "additions_by_section": { "Capabilities": 3, "Important Constraints": 2, "Anti-patterns": 2 },
+  "skipped_duplicates": ["..."],
+  "audit_before": { "passed": true, "error_count": 0, "warning_count": 0 },
+  "audit_after":  { "passed": true, "error_count": 0, "warning_count": 0 },
+  "rolled_back": false,
+  "backup_path": ".../SKILL.md.bak-2026-05-17T..."
 }
 ```
 
-Response when the book is fiction:
+### Example: preview (interactive, no writes)
+
+```json
+{
+  "mode": "preview",
+  "book": "The Mom Test Rob Fitzpatrick",
+  "skill_path": "/home/user/.claude/skills/project-architecting/SKILL.md",
+  "focus": "client discovery questions"
+}
+```
+
+Returns the proposed additions + a full patched preview. The agent reviews, picks selectively, and applies via `Edit` — no automatic disk write.
+
+### Rejection (non-methodology books)
 
 ```json
 {
   "ok": false,
-  "rejection": {
-    "reason": "Collection of folklore narratives, not methodology.",
-    "detected_genre": "Fairy Tale Collection"
-  }
+  "rejection": { "reason": "Collection of folklore narratives, not methodology.", "detected_genre": "Fairy Tale Collection" }
 }
 ```
 
@@ -213,38 +238,36 @@ Response when the book is fiction:
 
 These rules mirror the [Anthropic Agent Skills best-practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) checklist embedded in `~/.claude/skills/skill-evaluation/`.
 
-## Smoke scripts (no MCP transport)
+## Smoke (no MCP transport)
 
 ```bash
-npm run smoke         -- <md5>            # download only
-npm run smoke:analyze -- "<query>"        # generic literary summary (debug)
-npm run smoke:skill   -- "<query>"        # structured JSON extraction + draft
-npm run smoke:e2e     -- "<query>"        # full book_to_skill + audit
-npm run smoke:batch   -- "Q1" "Q2" "Q3"   # batch + token ledger
+npm run smoke -- preview "The Mom Test Rob Fitzpatrick"
+npm run smoke -- preview "Software Requirements Wiegers" /path/to/SKILL.md
+npm run smoke -- create  "Designing Data-Intensive Applications"
+npm run smoke -- enrich  "User Story Mapping Patton" /tmp/test-skill.md
 ```
 
 ## File layout
 
 ```
 src/
-├── index.ts                    MCP stdio server, registers 5 tools
+├── index.ts                    MCP stdio server, registers 2 tools
+├── smoke.ts                    unified CLI smoke (3 modes)
 ├── lib/
 │   ├── annas-client.ts         JSON API client (?key= auth only)
 │   ├── downloader.ts           streaming download + idempotent cache
 │   ├── epub-extractor.ts       epub / fb2 / pdf / txt → text
 │   ├── gemini-client.ts        Google AI Studio (text + JSON mode)
+│   ├── proxy.ts                HTTP / HTTPS / SOCKS5 dispatcher selection
 │   ├── skill-renderer.ts       JSON → SKILL.md + zod validator
+│   ├── skill-patcher.ts        deterministic surgical insertions for enrich mode
 │   └── skill-audit.ts          embedded Claude Code skill auditor
 ├── tools/
-│   ├── book-search.ts
-│   ├── book-get-url.ts
-│   ├── book-download.ts
-│   ├── book-to-skill.ts        end-to-end orchestration
+│   ├── book-skill.ts           unified modal tool (create / enrich / preview)
 │   └── skill-audit-tool.ts
-├── prompts/
-│   ├── extract-skill.md        Senior Skill Author prompt for Gemini (JSON schema)
-│   └── enrich-skill.md         (internal) merge multiple books into existing skill
-└── smoke*.ts                   CLI dev smokes
+└── prompts/
+    ├── extract-skill.md        Senior Skill Author prompt for create mode
+    └── enrich-skill-v2.md      Strict-JSON additions-only prompt for enrich/preview
 ```
 
 ## Proxy & WireGuard (optional)
@@ -310,9 +333,11 @@ The Gemini prompt requires citations with chapter/page for every capability. Gen
 ## Roadmap
 
 - [x] `book_enrich_skill(skill_path, book)` — augment an existing SKILL.md with a new book — shipped in v0.2.0
+- [x] Unified `book_skill` modal tool (`create | enrich | preview`) — shipped in v0.3.0
+- [x] WireGuard / SOCKS5 proxy opt-in via `ANNAS_HTTPS_PROXY` env (annas-only; Gemini direct) — shipped in v0.1.1
+- [ ] **Pattern 2 awareness** — for enrich, read entire skill folder (SKILL.md + `references/*.md`) for context; for create, auto-split into Pattern 2 when content >500 lines
 - [ ] Retry-with-feedback — on audit failure, re-prompt Gemini with the specific audit issues
 - [ ] `book_synthesize_skill(books[], target_name)` — merge N books into one synthesized skill
-- [x] WireGuard / SOCKS5 proxy opt-in via `ANNAS_HTTPS_PROXY` env (annas-only; Gemini direct) — shipped in v0.1.1
 - [ ] Published to npm as `mcp-annas-archive-create-skill`
 
 ## GitHub topics
@@ -332,7 +357,7 @@ Issues and PRs welcome. Before opening a PR:
 
 ```bash
 npm run build       # must be tsc-clean
-npm run smoke:e2e -- "Software Requirements Karl Wiegers"   # must pass audit
+npm run smoke -- preview "Software Requirements Karl Wiegers"   # must complete cleanly
 ```
 
 ## Author
