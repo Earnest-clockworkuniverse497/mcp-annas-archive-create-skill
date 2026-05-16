@@ -272,6 +272,8 @@ src/
 
 ## Proxy & WireGuard (optional)
 
+Anna's Archive is accessible from Russia without any geo-block — if you're hitting 502s or DDoS-Guard challenges, the most reliable fix is to use a residential RU IP. A cheap source of working IPv4/IPv6 IPs from Russia is [px6.me](https://px6.me/?r=32352) (proxy6 reseller), and any of those plug directly into `ANNAS_HTTPS_PROXY` below.
+
 Anna's Archive sometimes blocks server / datacenter IPs (DDoS-Guard, Cloudflare). If you need to route only the Anna's traffic through a proxy — leaving Gemini traffic direct — set one env var:
 
 ```dotenv
