@@ -28,6 +28,7 @@ import { bookDownload } from "./tools/book-download.js";
 import { bookSearch } from "./tools/book-search.js";
 import { bookToSkill } from "./tools/book-to-skill.js";
 import { skillAudit } from "./tools/skill-audit-tool.js";
+import { describeProxy } from "./lib/proxy.js";
 
 const server = new McpServer({
   name: "mcp-books",
@@ -180,7 +181,7 @@ async function main(): Promise<void> {
   }
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("mcp-books MCP server running via stdio");
+  console.error(`mcp-books MCP server running via stdio (Anna's proxy: ${describeProxy()})`);
 }
 
 main().catch((err) => {

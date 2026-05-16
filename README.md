@@ -246,6 +246,46 @@ src/
 └── smoke*.ts                   CLI dev smokes
 ```
 
+## Proxy & WireGuard (optional)
+
+Anna's Archive sometimes blocks server / datacenter IPs (DDoS-Guard, Cloudflare). If you need to route only the Anna's traffic through a proxy — leaving Gemini traffic direct — set one env var:
+
+```dotenv
+# .env
+ANNAS_HTTPS_PROXY=<scheme>://[user:pass@]host:port
+```
+
+Supported schemes:
+
+| Scheme | When to use |
+|---|---|
+| `http://` | Corporate forward proxy, residential HTTP proxy |
+| `https://` | TLS-wrapped HTTP proxy |
+| `socks5://` | Most consumer VPN / proxy providers (Mullvad, etc.). Also `socks4://`, `socks5h://`. |
+
+Examples:
+
+```dotenv
+ANNAS_HTTPS_PROXY=http://corp-proxy.local:8080
+ANNAS_HTTPS_PROXY=https://user:pass@proxy.example.com:443
+ANNAS_HTTPS_PROXY=socks5://127.0.0.1:1080
+ANNAS_HTTPS_PROXY=socks5://user:pass@residential.proxy.io:1080
+```
+
+If `ANNAS_HTTPS_PROXY` is unset, the server falls back to `HTTPS_PROXY` / `HTTP_PROXY` env vars (standard convention). Leave them unset for direct traffic.
+
+The MCP server logs the active proxy at startup: `mcp-books MCP server running via stdio (Anna's proxy: socks5://127.0.0.1:1080)`.
+
+### WireGuard
+
+WireGuard is a **system-level VPN**, not an app-level proxy — so it's configured outside this MCP. Three patterns:
+
+| Pattern | How |
+|---|---|
+| **System-wide** | `wg-quick up <name>` — entire host routes through WG. No env var needed; mcp-books traffic follows system routing. |
+| **Scoped via network namespace** | `ip netns add anna && ip netns exec anna wg-quick up <conf> && ip netns exec anna node dist/index.js` — only this server runs through WG. |
+| **WG endpoint exposes a SOCKS/HTTP proxy** | Set `ANNAS_HTTPS_PROXY=socks5://<wg-host>:<port>`. Useful with `microsocks` / `gost` bridges. |
+
 ## FAQ
 
 **Q: Is this legal?**

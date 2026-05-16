@@ -247,6 +247,46 @@ src/
 └── smoke*.ts                   CLI dev smokes
 ```
 
+## Прокси и WireGuard (опционально)
+
+Anna's Archive иногда блокирует server/datacenter IP (DDoS-Guard, Cloudflare). Если нужно завернуть **только** anna's-трафик через прокси (Gemini идёт напрямую), достаточно одной env-переменной:
+
+```dotenv
+# .env
+ANNAS_HTTPS_PROXY=<scheme>://[user:pass@]host:port
+```
+
+Поддерживаемые схемы:
+
+| Схема | Когда |
+|---|---|
+| `http://` | Корпоративный forward proxy, residential HTTP-прокси |
+| `https://` | TLS-обёрнутый HTTP-прокси |
+| `socks5://` | Большинство пользовательских VPN/прокси (Mullvad и т.п.). Также `socks4://`, `socks5h://`. |
+
+Примеры:
+
+```dotenv
+ANNAS_HTTPS_PROXY=http://corp-proxy.local:8080
+ANNAS_HTTPS_PROXY=https://user:pass@proxy.example.com:443
+ANNAS_HTTPS_PROXY=socks5://127.0.0.1:1080
+ANNAS_HTTPS_PROXY=socks5://user:pass@residential.proxy.io:1080
+```
+
+Если `ANNAS_HTTPS_PROXY` не задан — сервер падает обратно на стандартные `HTTPS_PROXY` / `HTTP_PROXY` env vars. Не задавай ничего → трафик идёт напрямую.
+
+MCP сервер логирует активный прокси при старте: `mcp-books MCP server running via stdio (Anna's proxy: socks5://127.0.0.1:1080)`.
+
+### WireGuard
+
+WireGuard — это **системный VPN**, не прокси уровня приложения, поэтому он конфигурируется вне MCP. Три паттерна:
+
+| Паттерн | Как |
+|---|---|
+| **Системно** | `wg-quick up <name>` — весь хост идёт через WG. Никакая env не нужна; трафик mcp-books идёт по системной маршрутизации. |
+| **Через network namespace** | `ip netns add anna && ip netns exec anna wg-quick up <conf> && ip netns exec anna node dist/index.js` — только этот сервер идёт через WG. |
+| **WG endpoint отдаёт SOCKS/HTTP прокси** | Поставь `ANNAS_HTTPS_PROXY=socks5://<wg-host>:<port>`. Полезно с `microsocks` / `gost`-мостами. |
+
 ## FAQ
 
 **В: Это законно?**

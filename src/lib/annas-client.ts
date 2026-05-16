@@ -1,5 +1,6 @@
 import { fetch } from "undici";
 import * as cheerio from "cheerio";
+import { getAnnasDispatcher } from "./proxy.js";
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -78,7 +79,7 @@ export async function getFastDownloadUrl(
     domain_index: String(serverIndex),
   });
   const url = `${cfg.baseUrl}/dyn/api/fast_download.json?${params.toString()}`;
-  const res = await fetch(url, { headers: defaultHeaders(cfg) });
+  const res = await fetch(url, { headers: defaultHeaders(cfg), dispatcher: getAnnasDispatcher() });
   const text = await res.text();
 
   let data: FastDownloadJsonResponse;
@@ -117,7 +118,7 @@ export async function getFastDownloadUrl(
 export async function getMetadata(cfg: AnnasConfig, md5: string): Promise<BookMetadata> {
   if (!/^[a-f0-9]{32}$/i.test(md5)) throw new Error(`invalid md5: ${md5}`);
   const url = `${cfg.baseUrl}/md5/${md5}`;
-  const res = await fetch(url, { headers: defaultHeaders(cfg) });
+  const res = await fetch(url, { headers: defaultHeaders(cfg), dispatcher: getAnnasDispatcher() });
   if (res.status !== 200) throw new Error(`md5 page HTTP ${res.status}`);
   const $ = cheerio.load(await res.text());
 
@@ -144,7 +145,7 @@ export async function searchBooks(
   limit = 10,
 ): Promise<SearchHit[]> {
   const url = `${cfg.baseUrl}/search?q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, { headers: defaultHeaders(cfg) });
+  const res = await fetch(url, { headers: defaultHeaders(cfg), dispatcher: getAnnasDispatcher() });
   if (res.status !== 200) throw new Error(`search HTTP ${res.status}`);
   const $ = cheerio.load(await res.text());
 

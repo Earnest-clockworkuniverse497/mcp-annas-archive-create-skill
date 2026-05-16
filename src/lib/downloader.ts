@@ -4,6 +4,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
+import { getAnnasDispatcher } from "./proxy.js";
 
 const UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
@@ -41,6 +42,7 @@ export async function downloadFile(
     const res = await fetch(url, {
       headers: { "User-Agent": UA },
       signal: controller.signal,
+      dispatcher: getAnnasDispatcher(),
     });
     if (res.status !== 200 || !res.body) {
       throw new Error(`download HTTP ${res.status}`);
