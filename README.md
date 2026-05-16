@@ -311,7 +311,7 @@ The Gemini prompt requires citations with chapter/page for every capability. Gen
 - [ ] `book_enrich_skill(skill_path, book)` — augment an existing SKILL.md with one or more new books (the «integrate Mom Test into project-architecting» flow as a first-class MCP tool)
 - [ ] Retry-with-feedback — on audit failure, re-prompt Gemini with the specific audit issues
 - [ ] `book_synthesize_skill(books[], target_name)` — merge N books into one synthesized skill
-- [ ] WireGuard / SOCKS5 proxy opt-in via `ANNAS_HTTPS_PROXY` env (annas-only; Gemini direct)
+- [x] WireGuard / SOCKS5 proxy opt-in via `ANNAS_HTTPS_PROXY` env (annas-only; Gemini direct) — shipped in v0.1.1
 - [ ] Published to npm as `mcp-annas-archive-create-skill`
 
 ## GitHub topics

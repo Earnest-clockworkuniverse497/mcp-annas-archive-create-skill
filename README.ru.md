@@ -312,7 +312,7 @@ Gemini промпт требует цитаты с указанием главы
 - [ ] `book_enrich_skill(skill_path, book)` — обогащение существующего SKILL.md одной или несколькими книгами (то что сейчас делалось руками для project-architecting — как полноценный MCP tool)
 - [ ] Retry с feedback — при провале аудита, перепрашиваем Gemini с конкретными issues
 - [ ] `book_synthesize_skill(books[], target_name)` — синтез N книг в один сводный скилл
-- [ ] WireGuard / SOCKS5 proxy opt-in через `ANNAS_HTTPS_PROXY` (только трафик anna's; Gemini напрямую)
+- [x] WireGuard / SOCKS5 proxy opt-in через `ANNAS_HTTPS_PROXY` (только трафик anna's; Gemini напрямую) — выпущено в v0.1.1
 - [ ] Публикация в npm как `mcp-annas-archive-create-skill`
 
 ## GitHub topics
