@@ -28,6 +28,7 @@ import { bookDownload } from "./tools/book-download.js";
 import { bookSearch } from "./tools/book-search.js";
 import { bookToSkill } from "./tools/book-to-skill.js";
 import { skillAudit } from "./tools/skill-audit-tool.js";
+import { bookEnrichSkill } from "./tools/book-enrich-skill.js";
 import { describeProxy } from "./lib/proxy.js";
 
 const server = new McpServer({
@@ -153,6 +154,27 @@ server.registerTool(
   },
   async ({ query, promote_to, max_text_chars, temperature }) => {
     const result = await bookToSkill({ query, promote_to, max_text_chars, temperature });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.registerTool(
+  "book_enrich_skill",
+  {
+    title: "Augment an existing SKILL.md with a new book (surgical)",
+    description:
+      "Adds methodology from a book into an EXISTING SKILL.md without rewriting it. Gemini returns only NEW atomic additions (subsections, bullets, anti-patterns); a deterministic patcher inserts them into the right sections. A backup is saved before writing. Audit runs before AND after — if audit gets strictly worse, the change is rolled back (no write). Use this to layer one book at a time into a target skill (e.g. add Designing Data-Intensive Applications to project-architecting).",
+    inputSchema: {
+      skill_path: z.string().describe("Absolute path to existing SKILL.md to enrich"),
+      book_query: z.string().min(2).describe("Book MD5 (32 hex) OR a search query"),
+      focus: z.string().optional().describe("Optional focus hint (e.g. 'sales discovery', 'distributed systems decisions')"),
+      dry_run: z.boolean().default(false).describe("If true, computes the patch + audit but does NOT write the file. Returns patched_preview."),
+      max_text_chars: z.number().int().min(10000).max(2_000_000).default(800_000),
+      temperature: z.number().min(0).max(1).default(0.2),
+    },
+  },
+  async ({ skill_path, book_query, focus, dry_run, max_text_chars, temperature }) => {
+    const result = await bookEnrichSkill({ skill_path, book_query, focus, dry_run, max_text_chars, temperature });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   },
 );

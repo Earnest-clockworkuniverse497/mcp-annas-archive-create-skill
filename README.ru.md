@@ -155,7 +155,8 @@ DATA_DIR=./data
 | `book_search` | Поиск Anna's Archive по названию / автору / ISBN / ключевым словам. До 50 хитов с md5 + метаданными. |
 | `book_get_download_url` | Прямой URL партнёр-сервера по md5 (через JSON API). Возвращает квоту. |
 | `book_download` | Скачивание по md5 в `$DATA_DIR/books/<md5>.<ext>`. Идемпотентно. Auto-fallback на 4 партнёр-сервера. |
-| **`book_to_skill`** | **Главный.** End-to-end: query/md5 → download → extract → Gemini → render → audit → optional promote в `~/.claude/skills/<имя>/SKILL.md`. |
+| **`book_to_skill`** | **Создаёт.** End-to-end: query/md5 → download → extract → Gemini → render → audit → optional promote в `~/.claude/skills/<имя>/SKILL.md`. |
+| **`book_enrich_skill`** | **Дополняет.** Surgical вставки из новой книги в УЖЕ существующий SKILL.md. Gemini возвращает только новые атомарные куски; детерминированный patcher вставляет их в нужные секции. Бэкап сохраняется. Если audit стал строго хуже — автоматический rollback. Есть `dry_run`. |
 | `skill_audit` | Запускает встроенный skill-evaluation аудит на любом SKILL.md. Переиспользуется не только для книжных скиллов. |
 
 ### Пример: `book_to_skill`
@@ -309,7 +310,7 @@ Gemini промпт требует цитаты с указанием главы
 
 ## Roadmap
 
-- [ ] `book_enrich_skill(skill_path, book)` — обогащение существующего SKILL.md одной или несколькими книгами (то что сейчас делалось руками для project-architecting — как полноценный MCP tool)
+- [x] `book_enrich_skill(skill_path, book)` — обогащение существующего SKILL.md новой книгой — выпущено в v0.2.0
 - [ ] Retry с feedback — при провале аудита, перепрашиваем Gemini с конкретными issues
 - [ ] `book_synthesize_skill(books[], target_name)` — синтез N книг в один сводный скилл
 - [x] WireGuard / SOCKS5 proxy opt-in через `ANNAS_HTTPS_PROXY` (только трафик anna's; Gemini напрямую) — выпущено в v0.1.1

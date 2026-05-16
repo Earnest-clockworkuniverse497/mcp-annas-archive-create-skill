@@ -154,7 +154,8 @@ Default model `gemini-3-flash-preview` — approximately $0.50 / $3.00 per 1M in
 | `book_search` | Search Anna's Archive by title / author / ISBN / keywords. Returns md5 + metadata for up to 50 hits. |
 | `book_get_download_url` | Resolve direct partner-server URL for a known md5 (via JSON API). Returns quota info. |
 | `book_download` | Download by md5 to `$DATA_DIR/books/<md5>.<ext>`. Idempotent. Auto-fallback across 4 partner servers. |
-| **`book_to_skill`** | **The headline tool.** End-to-end: query/md5 → download → extract → Gemini → render → audit → optional promote to `~/.claude/skills/<name>/SKILL.md`. |
+| **`book_to_skill`** | **Create.** End-to-end: query/md5 → download → extract → Gemini → render → audit → optional promote to `~/.claude/skills/<name>/SKILL.md`. |
+| **`book_enrich_skill`** | **Augment.** Surgical additions from a new book into an EXISTING SKILL.md. Gemini returns only NEW atomic items; a deterministic patcher inserts them into the right sections. Backup saved. If audit gets strictly worse → automatic rollback. Supports `dry_run`. |
 | `skill_audit` | Run the embedded skill-evaluation audit on any SKILL.md file. Reusable beyond books. |
 
 ### Example: `book_to_skill`
@@ -308,7 +309,7 @@ The Gemini prompt requires citations with chapter/page for every capability. Gen
 
 ## Roadmap
 
-- [ ] `book_enrich_skill(skill_path, book)` — augment an existing SKILL.md with one or more new books (the «integrate Mom Test into project-architecting» flow as a first-class MCP tool)
+- [x] `book_enrich_skill(skill_path, book)` — augment an existing SKILL.md with a new book — shipped in v0.2.0
 - [ ] Retry-with-feedback — on audit failure, re-prompt Gemini with the specific audit issues
 - [ ] `book_synthesize_skill(books[], target_name)` — merge N books into one synthesized skill
 - [x] WireGuard / SOCKS5 proxy opt-in via `ANNAS_HTTPS_PROXY` env (annas-only; Gemini direct) — shipped in v0.1.1

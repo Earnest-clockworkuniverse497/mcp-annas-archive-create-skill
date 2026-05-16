@@ -1,6 +1,6 @@
 {
   "name": "mcp-annas-archive-create-skill",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "MCP server for Claude Code: search & download books from Anna's Archive, extract methodology with Gemini, audit and generate a production-ready SKILL.md (Anthropic Agent Skills standard).",
   "type": "module",
   "main": "dist/index.js",
@@ -48,7 +48,8 @@
     "smoke:skill": "tsx src/smoke-skill.ts",
     "smoke:batch": "tsx src/smoke-batch.ts",
     "enrich:architect": "tsx src/enrich-architect-skill.ts",
-    "smoke:e2e": "tsx src/smoke-e2e.ts"
+    "smoke:e2e": "tsx src/smoke-e2e.ts",
+    "smoke:enrich": "tsx src/smoke-enrich.ts"
   },
   "engines": {
     "node": ">=20"
