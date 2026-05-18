@@ -91,6 +91,20 @@ async function runOfflineAssertions(): Promise<void> {
   }
   log(`[smoke]   searchBooks API surface OK (length=${searchBooks.length}, accepts preferFormat param)`);
 
+  // ── D) WATCH-FOLDER waitForBook timeout ───────────────────────────────────
+  log("[smoke] D) WATCH-FOLDER waitForBook timeout");
+  const { waitForBook } = await import("./lib/watch-folder.js");
+  const { mkdtempSync } = await import("node:fs");
+  {
+    const d = mkdtempSync(join(tmpdir(), "wf-smoke-"));
+    const t0 = Date.now();
+    const r = await waitForBook(d, "f".repeat(32), 200);
+    const dt = Date.now() - t0;
+    if (r !== null) { log("FAIL: expected null"); process.exit(1); }
+    if (dt > 2500) { log("FAIL: took too long", dt, "ms"); process.exit(1); }
+    log("[smoke]   waitForBook timeout OK (" + dt + "ms)");
+  }
+
   log("[smoke] PASS — all offline assertions OK");
 }
 

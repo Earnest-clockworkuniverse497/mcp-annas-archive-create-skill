@@ -174,6 +174,24 @@ The same `book` parameter accepts three forms — `book_skill` picks automatical
 | **MD5 (32 hex)** | `ad8211428498baf5e6197a2579e4acf2` | Looks for `$DATA_DIR/books/<md5>.*` first; downloads from Anna's only if missing. |
 | **Search query** | `Designing Data-Intensive Applications Kleppmann` | Searches Anna's, **filters out** unsupported formats (azw3, mobi, djvu, zip, cbz, cbr) before download so they never consume daily quota. Remaining hits sorted `epub > pdf > fb2 > txt`. Override with `prefer_format`. Falls back to the 2nd/3rd hit if the first one fails or returns a misnamed payload (validated by magic-byte detection). |
 
+### Manual download mode (no key / quota exhausted)
+
+When `ANNAS_ACCOUNT_KEY` is empty or the daily fast-download quota is exhausted, MCP prints a stderr block containing the Anna's Archive direct URL and the target save path, then polls `data/books/` for up to 10 minutes (default) waiting for the file to appear.
+
+To complete the download: open the URL in your browser, click **Slow download**, and save the file as `<md5>.<ext>` in the path MCP shows in the stderr block.
+
+```json
+{
+  "mode": "preview",
+  "book": "Influence Cialdini",
+  "manual_download_wait_ms": 600000
+}
+```
+
+- `MANUAL_DOWNLOAD_WAIT_MS` env var sets the default timeout when the param is omitted.
+- `manual_download_wait_ms: 0` disables waiting entirely (fast-fail with a clear hint).
+- The file extension can be wrong — the magic-byte detector validates the actual contents and renames the file if needed.
+
 ### Example: create from a local file
 
 ```json
