@@ -12,6 +12,13 @@ export interface AnnasConfig {
   accountKey: string;
 }
 
+export class QuotaExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QuotaExhaustedError";
+  }
+}
+
 export interface FastDownloadInfo {
   md5: string;
   server_index: number;
@@ -70,7 +77,7 @@ export async function getFastDownloadUrl(
     throw new Error(`invalid md5: ${md5}`);
   }
   if (!cfg.accountKey) {
-    throw new Error("ANNAS_ACCOUNT_KEY is required (member account key from annas-archive.gl)");
+    throw new QuotaExhaustedError("no API key (ANNAS_ACCOUNT_KEY empty)");
   }
   const params = new URLSearchParams({
     md5,
@@ -90,6 +97,9 @@ export async function getFastDownloadUrl(
   }
 
   if (data.error || !data.download_url) {
+    if (data.error && /quota|limit|exhaust|exceed/i.test(data.error)) {
+      throw new QuotaExhaustedError(data.error);
+    }
     throw new Error(`fast_download API error: ${data.error ?? "no download_url returned"}`);
   }
 
@@ -103,6 +113,10 @@ export async function getFastDownloadUrl(
     downloads_per_day: -1,
     downloads_done_today: -1,
   };
+
+  if (data.account_fast_download_info?.downloads_left === 0) {
+    throw new QuotaExhaustedError("daily download quota exhausted (downloads_left=0)");
+  }
 
   return {
     md5,
@@ -195,5 +209,11 @@ export function loadConfigFromEnv(): AnnasConfig {
   if (!accountKey) {
     throw new Error("ANNAS_ACCOUNT_KEY not set in env (member account key from annas-archive.gl)");
   }
+  return { baseUrl, accountKey };
+}
+
+export function loadConfigFromEnvSoft(): AnnasConfig {
+  const baseUrl = process.env.ANNAS_BASE_URL ?? "https://annas-archive.gl";
+  const accountKey = process.env.ANNAS_ACCOUNT_KEY ?? "";
   return { baseUrl, accountKey };
 }
