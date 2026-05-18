@@ -139,10 +139,13 @@ export async function getMetadata(cfg: AnnasConfig, md5: string): Promise<BookMe
   };
 }
 
+const FORMAT_WHITELIST = new Set(["epub", "fb2", "pdf", "txt"]);
+
 export async function searchBooks(
   cfg: AnnasConfig,
   query: string,
   limit = 10,
+  preferFormat?: "epub" | "pdf" | "fb2" | "txt",
 ): Promise<SearchHit[]> {
   const url = `${cfg.baseUrl}/search?q=${encodeURIComponent(query)}`;
   const res = await fetch(url, { headers: defaultHeaders(cfg), dispatcher: getAnnasDispatcher() });
@@ -164,11 +167,26 @@ export async function searchBooks(
                   "(no title)";
     const authors = block.find("div.italic").first().text().trim() || "(unknown)";
     const meta = block.find("div.text-gray-500").first().text().trim();
-    const fmt = meta.match(/\b(epub|pdf|mobi|djvu|fb2|azw3)\b/i)?.[1] ?? "?";
+    const fmt = meta.match(/\b(epub|pdf|mobi|djvu|fb2|azw3|txt)\b/i)?.[1] ?? "?";
     const size = meta.match(/[\d.]+\s?(KB|MB|GB)/i)?.[0] ?? "?";
     hits.push({ md5, title, authors, format: fmt.toLowerCase(), size_human: size });
   });
-  return hits;
+
+  const excluded: string[] = hits
+    .filter((h) => !FORMAT_WHITELIST.has(h.format))
+    .map((h) => h.format);
+  if (excluded.length > 0) {
+    const unique = [...new Set(excluded)].join(", ");
+    process.stderr.write(`[annas] filtered ${excluded.length} hits (excluded: ${unique})\n`);
+  }
+
+  const filtered = hits.filter((h) => FORMAT_WHITELIST.has(h.format));
+
+  if (!preferFormat) return filtered;
+
+  const preferred = filtered.filter((h) => h.format === preferFormat);
+  const rest = filtered.filter((h) => h.format !== preferFormat);
+  return [...preferred, ...rest];
 }
 
 export function loadConfigFromEnv(): AnnasConfig {
