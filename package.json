@@ -1,6 +1,6 @@
 {
   "name": "mcp-annas-archive-create-skill",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "MCP server for Claude Code: one unified book_skill tool with create | enrich | preview modes. Anna's Archive search/download + Gemini methodology extraction → audited SKILL.md (Anthropic Agent Skills standard).",
   "type": "module",
   "main": "dist/index.js",
