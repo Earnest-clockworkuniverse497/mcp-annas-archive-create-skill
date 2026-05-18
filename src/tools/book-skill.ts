@@ -16,10 +16,14 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  loadConfigFromEnv as loadAnnas,
+  loadConfigFromEnvSoft,
   searchBooks,
   getFastDownloadUrl,
+  QuotaExhaustedError,
+  type AnnasConfig,
+  type SearchHit,
 } from "../lib/annas-client.js";
+import { waitForBook } from "../lib/watch-folder.js";
 import { downloadFile } from "../lib/downloader.js";
 import { extractBookText } from "../lib/epub-extractor.js";
 import { generateText, loadGeminiConfigFromEnv } from "../lib/gemini-client.js";
@@ -67,6 +71,15 @@ export const BookSkillInputSchema = z.object({
   focus: z.string().optional().describe("Optional focus hint (e.g. 'sales discovery', 'distributed systems decisions')"),
   prefer_format: z.enum(["epub", "pdf", "fb2", "txt"]).optional()
     .describe("Optional preferred format; ranks this format first in search results"),
+  manual_download_wait_ms: z
+    .number()
+    .int()
+    .min(0)
+    .max(3_600_000)
+    .optional()
+    .describe(
+      "Wait this many ms for a manually-downloaded file in data/books/ when fast-download is unavailable. 0 = no wait (fail fast). Default 600000 (10 min) or env MANUAL_DOWNLOAD_WAIT_MS.",
+    ),
   dry_run: z
     .boolean()
     .default(false)
@@ -129,61 +142,108 @@ async function asLocalFile(input: string): Promise<BookFile | null> {
   return { md5, path: absPath, format: ext, size_bytes: buf.length };
 }
 
-async function resolveAndDownload(book: string, preferFormat?: BookSkillInput["prefer_format"]): Promise<BookFile> {
-  const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
-  const booksDir = join(dataDir, "books");
+function printManualDownloadBlock(md5: string, booksDir: string, waitMs: number): void {
+  const mm = Math.floor(waitMs / 60000);
+  const ss = String(Math.floor((waitMs % 60000) / 1000)).padStart(2, "0");
+  const lines = [
+    "─────────────────────────────────────────────────────────────",
+    "[mcp-books] Manual download mode (slow path / no key / quota)",
+    "─────────────────────────────────────────────────────────────",
+    "  1. Open in browser:",
+    `       https://annas-archive.gl/md5/${md5}`,
+    `  2. Click "Slow download" — wait for the timer.`,
+    "  3. Save the file as:",
+    `       ${booksDir}/${md5}.<ext>`,
+    "     Allowed extensions: .epub .fb2 .pdf .txt",
+    "     (Wrong extension is OK — magic-byte detector will fix it.)",
+    "",
+    `   Waiting up to ${mm}:${ss}. Polling every 2s.`,
+    "─────────────────────────────────────────────────────────────",
+  ];
+  for (const l of lines) process.stderr.write(l + "\n");
+}
 
-  // Highest priority: user-supplied local file path
-  const local = await asLocalFile(book);
-  if (local) return local;
-
-  let md5 = book;
-  const isMd5 = /^[a-f0-9]{32}$/i.test(book);
-
-  // Fast path: cached file by md5 — skip Anna's API entirely
-  if (isMd5) {
-    const cached = await findCachedByMd5(md5, booksDir);
-    if (cached) return cached;
+async function runWatchMode(md5: string, booksDir: string, waitMs: number): Promise<BookFile> {
+  await mkdir(booksDir, { recursive: true });
+  printManualDownloadBlock(md5, booksDir, waitMs);
+  const onTick = (e: number, r: number): void => {
+    const fmt = (ms: number): string => {
+      const m = Math.floor(ms / 60000);
+      const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, "0");
+      return `${m}:${s}`;
+    };
+    process.stderr.write(`[mcp-books] ${fmt(e)} elapsed, ${fmt(r)} remaining...\n`);
+  };
+  const wait = await waitForBook(booksDir, md5, waitMs, onTick);
+  if (!wait) {
+    throw new Error(`manual download timed out after ${Math.floor(waitMs / 1000)}s for md5=${md5}`);
   }
+  process.stderr.write(
+    `[mcp-books] Found file: ${wait.path} (${(wait.size_bytes / 1024 / 1024).toFixed(2)} MB). Validating...\n`,
+  );
+  const detected = await detectMagic(wait.path);
+  if (detected === "rtf" || detected === "html" || detected === "unknown") {
+    await unlink(wait.path).catch(() => {});
+    throw new Error(`manual download payload is not a supported book (detected=${detected})`);
+  }
+  if (detected !== wait.format && wait.format !== "bin") {
+    // mismatch — rename to detected
+    const newPath = join(booksDir, `${md5}.${detected}`);
+    await rename(wait.path, newPath);
+    return { md5, path: newPath, format: detected, size_bytes: wait.size_bytes };
+  }
+  if (wait.format === "bin") {
+    // user saved as .bin — rename to detected so extractor recognises it
+    const newPath = join(booksDir, `${md5}.${detected}`);
+    await rename(wait.path, newPath);
+    return { md5, path: newPath, format: detected, size_bytes: wait.size_bytes };
+  }
+  return { md5, path: wait.path, format: wait.format, size_bytes: wait.size_bytes };
+}
 
-  const cfg = loadAnnas();
-  if (!isMd5) {
-    const hits = await searchBooks(cfg, book, 10, preferFormat);
-    if (hits.length === 0) throw new Error(`no Anna's Archive results for: ${book}`);
-    const priority: Record<string, number> = { epub: 1, pdf: 2, fb2: 3, txt: 4 };
-    hits.sort((a, b) => (priority[a.format] ?? 9) - (priority[b.format] ?? 9));
-
-    const candidateHits = hits.slice(0, 3);
-    const errors: string[] = [];
-    for (const hit of candidateHits) {
-      const cached = await findCachedByMd5(hit.md5, booksDir);
-      if (cached) return cached;
-      for (const idx of [0, 1, 2, 3]) {
-        try {
-          const info = await getFastDownloadUrl(cfg, hit.md5, idx);
-          const dest = join(booksDir, `${hit.md5}.${info.format}`);
-          const dl = await downloadFile(info.direct_url, dest, { overwrite: false, timeoutMs: 300_000 });
-          const detected = await detectMagic(dl.path);
-          if (detected === "rtf" || detected === "html" || detected === "unknown") {
-            await unlink(dl.path).catch(() => {});
-            errors.push(`${hit.md5}@srv${idx}: bad payload (${detected})`);
-            continue;
-          }
-          if (detected !== info.format) {
-            const newPath = join(booksDir, `${hit.md5}.${detected}`);
-            await rename(dl.path, newPath);
-            return { md5: hit.md5, path: newPath, format: detected, size_bytes: dl.size_bytes };
-          }
-          return { md5: hit.md5, path: dl.path, format: info.format, size_bytes: dl.size_bytes };
-        } catch (err) {
-          errors.push(`${hit.md5}@srv${idx}: ${err instanceof Error ? err.message : String(err)}`);
+async function tryFastDownloadForHits(
+  cfg: AnnasConfig,
+  candidateHits: SearchHit[],
+  booksDir: string,
+): Promise<BookFile> {
+  const errors: string[] = [];
+  for (const hit of candidateHits) {
+    const cached = await findCachedByMd5(hit.md5, booksDir);
+    if (cached) return cached;
+    for (const idx of [0, 1, 2, 3]) {
+      try {
+        const info = await getFastDownloadUrl(cfg, hit.md5, idx);
+        const dest = join(booksDir, `${hit.md5}.${info.format}`);
+        const dl = await downloadFile(info.direct_url, dest, { overwrite: false, timeoutMs: 300_000 });
+        const detected = await detectMagic(dl.path);
+        if (detected === "rtf" || detected === "html" || detected === "unknown") {
+          await unlink(dl.path).catch(() => {});
+          errors.push(`${hit.md5}@srv${idx}: bad payload (${detected})`);
+          continue;
         }
+        if (detected !== info.format) {
+          const newPath = join(booksDir, `${hit.md5}.${detected}`);
+          await rename(dl.path, newPath);
+          return { md5: hit.md5, path: newPath, format: detected, size_bytes: dl.size_bytes };
+        }
+        return { md5: hit.md5, path: dl.path, format: info.format, size_bytes: dl.size_bytes };
+      } catch (err) {
+        if (err instanceof QuotaExhaustedError) {
+          // re-throw immediately — let caller decide watch vs fail
+          throw err;
+        }
+        errors.push(`${hit.md5}@srv${idx}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    throw new Error(`all candidate hits failed (${candidateHits.length} books × 4 servers). Errors: ${errors.slice(-6).join(" | ")}`);
   }
+  throw new Error(`all candidate hits failed (${candidateHits.length} books × 4 servers). Errors: ${errors.slice(-6).join(" | ")}`);
+}
 
-  // md5-input path: single md5, partner-server loop
+async function tryFastDownloadSingleMd5(
+  cfg: AnnasConfig,
+  md5: string,
+  booksDir: string,
+): Promise<BookFile> {
   const errors: string[] = [];
   for (const idx of [0, 1, 2, 3]) {
     try {
@@ -203,12 +263,76 @@ async function resolveAndDownload(book: string, preferFormat?: BookSkillInput["p
       }
       return { md5, path: dl.path, format: info.format, size_bytes: dl.size_bytes };
     } catch (err) {
+      if (err instanceof QuotaExhaustedError) throw err;
       errors.push(`${md5}@srv${idx}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  throw new Error(
-    `all partner servers failed for md5=${md5}. Errors: ${errors.slice(-4).join(" | ")}`,
-  );
+  throw new Error(`all partner servers failed for md5=${md5}. Errors: ${errors.slice(-4).join(" | ")}`);
+}
+
+async function resolveAndDownload(
+  book: string,
+  preferFormat?: BookSkillInput["prefer_format"],
+  manualWaitMs?: number,
+): Promise<BookFile> {
+  const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
+  const booksDir = join(dataDir, "books");
+
+  // Local file path — bypass everything
+  const local = await asLocalFile(book);
+  if (local) return local;
+
+  const isMd5 = /^[a-f0-9]{32}$/i.test(book);
+  const waitMs = manualWaitMs ?? 0;
+
+  // Fast-path: md5 already cached
+  if (isMd5) {
+    const cached = await findCachedByMd5(book, booksDir);
+    if (cached) return cached;
+  }
+
+  const cfg = loadConfigFromEnvSoft();
+
+  if (isMd5) {
+    // Direct md5 input
+    if (cfg.accountKey) {
+      try {
+        return await tryFastDownloadSingleMd5(cfg, book, booksDir);
+      } catch (err) {
+        if (err instanceof QuotaExhaustedError) {
+          if (waitMs > 0) return await runWatchMode(book, booksDir, waitMs);
+          throw new Error(`no key / quota exhausted; set manual_download_wait_ms > 0 to wait. underlying: ${err.message}`);
+        }
+        throw err;
+      }
+    }
+    // No key at all
+    if (waitMs > 0) return await runWatchMode(book, booksDir, waitMs);
+    throw new Error("no ANNAS_ACCOUNT_KEY; set manual_download_wait_ms > 0 to wait for a manual download");
+  }
+
+  // Search path
+  const hits = await searchBooks(cfg, book, 10, preferFormat);
+  if (hits.length === 0) throw new Error(`no Anna's Archive results for: ${book}`);
+  const priority: Record<string, number> = { epub: 1, pdf: 2, fb2: 3, txt: 4 };
+  hits.sort((a, b) => (priority[a.format] ?? 9) - (priority[b.format] ?? 9));
+  const candidateHits = hits.slice(0, 3);
+  const targetMd5 = candidateHits[0].md5;
+
+  if (cfg.accountKey) {
+    try {
+      return await tryFastDownloadForHits(cfg, candidateHits, booksDir);
+    } catch (err) {
+      if (err instanceof QuotaExhaustedError) {
+        if (waitMs > 0) return await runWatchMode(targetMd5, booksDir, waitMs);
+        throw new Error(`no key / quota exhausted; set manual_download_wait_ms > 0 to wait. underlying: ${err.message}`);
+      }
+      throw err;
+    }
+  }
+  // No key
+  if (waitMs > 0) return await runWatchMode(targetMd5, booksDir, waitMs);
+  throw new Error("no ANNAS_ACCOUNT_KEY; set manual_download_wait_ms > 0 to wait for a manual download");
 }
 
 interface CommonFields {
@@ -416,7 +540,9 @@ export async function bookSkill(input: BookSkillInput) {
     throw new Error("mode='enrich' requires skill_path");
   }
 
-  const bookFile = await resolveAndDownload(input.book, input.prefer_format);
+  const envWait = parseInt(process.env.MANUAL_DOWNLOAD_WAIT_MS ?? "", 10);
+  const waitMs = input.manual_download_wait_ms ?? (Number.isFinite(envWait) ? envWait : 600_000);
+  const bookFile = await resolveAndDownload(input.book, input.prefer_format, waitMs);
   const extracted = await extractBookText(bookFile.path);
   const text = extracted.text.slice(0, input.max_text_chars);
 
