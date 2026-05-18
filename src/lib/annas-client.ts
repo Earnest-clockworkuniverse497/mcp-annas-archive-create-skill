@@ -139,7 +139,7 @@ export async function getMetadata(cfg: AnnasConfig, md5: string): Promise<BookMe
   };
 }
 
-const FORMAT_WHITELIST = new Set(["epub", "fb2", "pdf", "txt"]);
+const FORMAT_WHITELIST = new Set(["epub", "fb2", "pdf", "txt", "?"]);
 
 export async function searchBooks(
   cfg: AnnasConfig,
