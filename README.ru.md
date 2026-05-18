@@ -173,7 +173,7 @@ DATA_DIR=./data
 |---|---|---|
 | **Локальный путь** | `/home/user/Downloads/mom-test.pdf` (тоже `~/`, `./`) | Anna's Archive **не вызывается**. Файл читается напрямую. Поддерживается: `.epub`, `.fb2`, `.pdf`, `.txt`. |
 | **MD5 (32 hex)** | `ad8211428498baf5e6197a2579e4acf2` | Ищет в `$DATA_DIR/books/<md5>.*` сначала; качает с Anna's только если нет в кеше. |
-| **Поисковый запрос** | `Designing Data-Intensive Applications Kleppmann` | Ищет на Anna's, берёт лучший хит (приоритет epub→fb2→pdf→txt), скачивает. |
+| **Поисковый запрос** | `Designing Data-Intensive Applications Kleppmann` | Ищет на Anna's, **отфильтровывает** неподдерживаемые форматы (azw3, mobi, djvu, zip, cbz, cbr) ещё до скачивания — они не тратят дневную квоту. Оставшиеся хиты сортируются `epub > pdf > fb2 > txt`. Можно переопределить через `prefer_format`. Если первый хит сдох на всех partner-серверах или скачался мусор (RTF/HTML — детектится по magic-byte) — fallback на 2-й и 3-й хит. |
 
 ### Пример: create из локального файла
 
@@ -195,6 +195,19 @@ DATA_DIR=./data
   "temperature": 0.2
 }
 ```
+
+Опциональный `prefer_format` поднимает один формат в топ выдачи (если его нет — берётся следующий из разрешённых):
+
+```json
+{
+  "mode": "create",
+  "book": "Influence Cialdini",
+  "prefer_format": "epub",
+  "promote_to": "/home/user/.claude/skills/book-influence/SKILL.md"
+}
+```
+
+Допустимые значения: `epub`, `pdf`, `fb2`, `txt`. Всё остальное отсекается до запроса на скачивание.
 
 Успешный ответ:
 

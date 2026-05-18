@@ -172,7 +172,7 @@ The same `book` parameter accepts three forms — `book_skill` picks automatical
 |---|---|---|
 | **Local file path** | `/home/user/Downloads/mom-test.pdf` (also `~/`, `./`) | Anna's Archive is NOT called. File is read directly. Supported: `.epub`, `.fb2`, `.pdf`, `.txt`. |
 | **MD5 (32 hex)** | `ad8211428498baf5e6197a2579e4acf2` | Looks for `$DATA_DIR/books/<md5>.*` first; downloads from Anna's only if missing. |
-| **Search query** | `Designing Data-Intensive Applications Kleppmann` | Searches Anna's, picks best hit (prefers epub→fb2→pdf→txt), downloads. |
+| **Search query** | `Designing Data-Intensive Applications Kleppmann` | Searches Anna's, **filters out** unsupported formats (azw3, mobi, djvu, zip, cbz, cbr) before download so they never consume daily quota. Remaining hits sorted `epub > pdf > fb2 > txt`. Override with `prefer_format`. Falls back to the 2nd/3rd hit if the first one fails or returns a misnamed payload (validated by magic-byte detection). |
 
 ### Example: create from a local file
 
@@ -193,6 +193,19 @@ The same `book` parameter accepts three forms — `book_skill` picks automatical
   "promote_to": "/home/user/.claude/skills/book-ddia/SKILL.md"
 }
 ```
+
+Optional `prefer_format` ranks one format first in search results (still falls back to other allowed formats if the preferred one isn't available):
+
+```json
+{
+  "mode": "create",
+  "book": "Influence Cialdini",
+  "prefer_format": "epub",
+  "promote_to": "/home/user/.claude/skills/book-influence/SKILL.md"
+}
+```
+
+Allowed values: `epub`, `pdf`, `fb2`, `txt`. Everything else is filtered out before any download attempt.
 
 ### Example: enrich an existing skill
 
