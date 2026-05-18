@@ -9,7 +9,7 @@
  * Internally orchestrates search → download → text-extract → Gemini → render/patch → audit.
  */
 import { z } from "zod";
-import { readFile, writeFile, mkdir, copyFile, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, copyFile, readdir, stat, unlink, rename } from "node:fs/promises";
 import { dirname, join, resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -38,6 +38,7 @@ import {
 } from "../lib/skill-patcher.js";
 import { auditSkillMd, type AuditResult } from "../lib/skill-audit.js";
 import { loadSkill, formatSkillForPrompt } from "../lib/skill-loader.js";
+import { detectMagic } from "../lib/magic-bytes.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXTRACT_PROMPT = resolve(HERE, "..", "prompts", "extract-skill.md");
@@ -64,6 +65,8 @@ export const BookSkillInputSchema = z.object({
     .optional()
     .describe("mode=create only. Absolute path; copies generated SKILL.md here ONLY if audit passes 0 errors."),
   focus: z.string().optional().describe("Optional focus hint (e.g. 'sales discovery', 'distributed systems decisions')"),
+  prefer_format: z.enum(["epub", "pdf", "fb2", "txt"]).optional()
+    .describe("Optional preferred format; ranks this format first in search results"),
   dry_run: z
     .boolean()
     .default(false)
@@ -126,7 +129,7 @@ async function asLocalFile(input: string): Promise<BookFile | null> {
   return { md5, path: absPath, format: ext, size_bytes: buf.length };
 }
 
-async function resolveAndDownload(book: string): Promise<BookFile> {
+async function resolveAndDownload(book: string, preferFormat?: BookSkillInput["prefer_format"]): Promise<BookFile> {
   const dataDir = process.env.DATA_DIR ?? join(homedir(), "tools/mcp-books/data");
   const booksDir = join(dataDir, "books");
 
@@ -145,31 +148,66 @@ async function resolveAndDownload(book: string): Promise<BookFile> {
 
   const cfg = loadAnnas();
   if (!isMd5) {
-    const hits = await searchBooks(cfg, book, 10);
+    const hits = await searchBooks(cfg, book, 10, preferFormat);
     if (hits.length === 0) throw new Error(`no Anna's Archive results for: ${book}`);
-    const priority: Record<string, number> = { epub: 1, fb2: 2, pdf: 3, txt: 4 };
+    const priority: Record<string, number> = { epub: 1, pdf: 2, fb2: 3, txt: 4 };
     hits.sort((a, b) => (priority[a.format] ?? 9) - (priority[b.format] ?? 9));
-    md5 = hits[0].md5;
-    // Recheck cache after resolving md5
-    const cached = await findCachedByMd5(md5, booksDir);
-    if (cached) return cached;
+
+    const candidateHits = hits.slice(0, 3);
+    const errors: string[] = [];
+    for (const hit of candidateHits) {
+      const cached = await findCachedByMd5(hit.md5, booksDir);
+      if (cached) return cached;
+      for (const idx of [0, 1, 2, 3]) {
+        try {
+          const info = await getFastDownloadUrl(cfg, hit.md5, idx);
+          const dest = join(booksDir, `${hit.md5}.${info.format}`);
+          const dl = await downloadFile(info.direct_url, dest, { overwrite: false, timeoutMs: 300_000 });
+          const detected = await detectMagic(dl.path);
+          if (detected === "rtf" || detected === "html" || detected === "unknown") {
+            await unlink(dl.path).catch(() => {});
+            errors.push(`${hit.md5}@srv${idx}: bad payload (${detected})`);
+            continue;
+          }
+          if (detected !== info.format) {
+            const newPath = join(booksDir, `${hit.md5}.${detected}`);
+            await rename(dl.path, newPath);
+            return { md5: hit.md5, path: newPath, format: detected, size_bytes: dl.size_bytes };
+          }
+          return { md5: hit.md5, path: dl.path, format: info.format, size_bytes: dl.size_bytes };
+        } catch (err) {
+          errors.push(`${hit.md5}@srv${idx}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+    throw new Error(`all candidate hits failed (${candidateHits.length} books × 4 servers). Errors: ${errors.slice(-6).join(" | ")}`);
   }
 
-  const indices = [0, 1, 2, 3];
-  let lastErr: unknown;
-
-  for (const idx of indices) {
+  // md5-input path: single md5, partner-server loop
+  const errors: string[] = [];
+  for (const idx of [0, 1, 2, 3]) {
     try {
       const info = await getFastDownloadUrl(cfg, md5, idx);
       const dest = join(booksDir, `${md5}.${info.format}`);
       const dl = await downloadFile(info.direct_url, dest, { overwrite: false, timeoutMs: 300_000 });
+      const detected = await detectMagic(dl.path);
+      if (detected === "rtf" || detected === "html" || detected === "unknown") {
+        await unlink(dl.path).catch(() => {});
+        errors.push(`${md5}@srv${idx}: bad payload (${detected})`);
+        continue;
+      }
+      if (detected !== info.format) {
+        const newPath = join(booksDir, `${md5}.${detected}`);
+        await rename(dl.path, newPath);
+        return { md5, path: newPath, format: detected, size_bytes: dl.size_bytes };
+      }
       return { md5, path: dl.path, format: info.format, size_bytes: dl.size_bytes };
     } catch (err) {
-      lastErr = err;
+      errors.push(`${md5}@srv${idx}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   throw new Error(
-    `all partner servers failed for md5=${md5}. last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+    `all partner servers failed for md5=${md5}. Errors: ${errors.slice(-4).join(" | ")}`,
   );
 }
 
@@ -378,7 +416,7 @@ export async function bookSkill(input: BookSkillInput) {
     throw new Error("mode='enrich' requires skill_path");
   }
 
-  const bookFile = await resolveAndDownload(input.book);
+  const bookFile = await resolveAndDownload(input.book, input.prefer_format);
   const extracted = await extractBookText(bookFile.path);
   const text = extracted.text.slice(0, input.max_text_chars);
 
